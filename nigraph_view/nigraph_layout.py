@@ -3,6 +3,7 @@
 """Main module."""
 import numpy as np 
 import nigraph as ng
+import nibabel as nib
 
 from bokeh.plotting import figure, curdoc
 from bokeh.models import Button, CustomJS, HoverTool, ColumnDataSource
@@ -10,6 +11,8 @@ from bokeh.layouts import column, row, layout
 from bokeh.models.ranges import Range1d
 from bokeh.models.widgets import TextInput, Button, PreText, Dropdown, Slider
 from pathlib import Path
+from functools import partial
+
 
 # genaral 
 TOOLS = "wheel_zoom,box_zoom,reset"
@@ -48,12 +51,14 @@ accept_atlas_and_meta_button.on_click(accept_atlas_and_meta_path)
 
 # Connectivity
 def label_array(orig_list):
+    """makes the labels be in the very strange format bokeh needs it in"""
     x_labels = [[list(orig_list) for i in range(len(orig_list))]]
     revered_labels = orig_list[::-1]
     y_labels = [[[revered_labels[i]]*len(revered_labels) for i in range(len(revered_labels))]]
     return x_labels, y_labels
 
 def get_conn_datasource():
+    """creates the data source for plotting and hovering in the conn mat"""
     conn_mat = np.flip(data.connectivity_matrix, axis=0) # slipped so diagonal is top to bottom
     label_names = list(data.labels.area)
     label_numbers = list(data.labels.index) 
@@ -86,13 +91,6 @@ conn_mat_fig = figure(tools=TOOLS, width=int(total_width/2), height=550)
 def connectivity_measure(text_name, label):
     text_name.text = str(data.measure(label))
 
-cc = Button()
-msp = Button()
-dd = Button()
-nc = Button()
-ec = Button()
-mcc = Button()
-
 cc_value = PreText(text=" ")
 msp_value = PreText(text=" ")
 dd_value = PreText(text=" ")
@@ -100,17 +98,18 @@ nc_value = PreText(text=" ")
 ec_value = PreText(text=" ")
 mcc_value = PreText(text=" ")
 
-for mes_name, button_name, text_name in [
-    ["Closness Centrality", cc, cc_value],
-    ["Mean Shortest Path", msp, msp_value],
-    ["Degree Distribution", dd, dd_value],
-    ["Node Connectivity", nc, nc_value],
-    ["Edge Connectivity", ec, ec_value],
-    ["Mean Clustering", mcc, mcc_value],
-]:
-    button_name.label=mes_name
-    button_name.width=int(total_width/8)
-    #button_name.on.click(lambda x : connectivity_measure(text_name, x.label))
+cc = Button(label="Closness Centrality", width=int(total_width/8))
+cc.on_click(partial(connectivity_measure, text_name=cc_value, label=cc.label))
+msp = Button(label="Mean Shortest Path", width=int(total_width/8))
+msp.on_click(partial(connectivity_measure, text_name=msp_value, label=msp.label))
+dd = Button(label="Degree Distribution", width=int(total_width/8))
+dd.on_click(partial(connectivity_measure, text_name=dd_value, label=dd.label))
+nc = Button(label="Node Connectivity", width=int(total_width/8))
+nc.on_click(partial(connectivity_measure, text_name=nc_value, label=nc.label))
+ec = Button(label="Edge Connectivity", width=int(total_width/8))
+ec.on_click(partial(connectivity_measure, text_name=ec_value, label=ec.label))
+mcc = Button(label="Mean Clustering", width=int(total_width/8))
+mcc.on_click(partial(connectivity_measure, text_name=mcc_value, label=mcc.label))
 
 # fMRI header
 fMRIheader = PreText(text="For ROI analysis", style={'font-size': '200%', 'color': 'blue'})
@@ -120,12 +119,12 @@ fMRIheader = PreText(text="For ROI analysis", style={'font-size': '200%', 'color
 # Choose ROI to use
 def accept_ROI_path_and_prefix():
     try:
-        data.set_roi(ROI_path.value, ROI_prefix.value)
+        data.set_roi(Path(ROI_path.value), Path(ROI_prefix.value))
     except UserWarning as e:
         warning_win.text = e
     
-ROI_path = TextInput(value=" ", title="ROI Path", width=int(total_width/4), height=50)
-ROI_prefix = TextInput(value=" ", title="ROI Prefix", width=int(total_width/4), height=50)
+ROI_path = TextInput(value="", title="ROI Path", width=int(total_width/4), height=50)
+ROI_prefix = TextInput(value="", title="ROI Prefix", width=int(total_width/4), height=50)
 
 accept_ROI_button = Button(label="Accept ROI Inputs", width=int(total_width/4), height=32, margin=[23,0,0,0])
 accept_ROI_button.on_click(accept_ROI_path_and_prefix)
@@ -137,13 +136,15 @@ choose_dim = Dropdown(label="choose dimension to slide", menu=drop_menu, value='
 slider = Slider(start=0, end=100, step=1, value=40, width=int(total_width/2), height=50)
 
 def remove_brain(old_brain):
+    """removes glyphs, you would think bokeh would have built it theirselves, wouldnt you?"""
     for glyph in old_brain:
         ROI_fig.renderers.remove(glyph)
 
 def plot_ROI_fig():
-    img = data.seed_based
+    # img = data.seed_based -- this is the good line. next line is place holder for presentation
+    img = nib.load('04_T1w_MPRAGE_T1w_MPRAGE_20180225111954_4.nii').get_data()
     if img is None:
-        pass # add a warning
+        warning_win.text = 'no available seed roi connectiviry image'
 
     ROI_fig.image([img[slider.value, :, :].T], x=0, y=0, dw=(img.shape[1]/img.shape[2])*7, dh=7, palette="Greys256", name = 'brain')
 
@@ -152,9 +153,11 @@ def plot_ROI_fig():
         slider.end = img.shape[dim]
         current_slice = slider.value
 
+        # delete current figure
         old_brain = ROI_fig.select('brain')
         remove_brain(old_brain)
-            
+         
+        # create new figure due to selection
         if dim == 0:
             ROI_fig.x_range = Range1d(0,img.shape[1])
             ROI_fig.y_range = Range1d(0,img.shape[2])
@@ -184,6 +187,7 @@ curdoc().add_root(layout([
     [conn_mat_fig, [[cc,cc_value],[msp,msp_value],[dd,dd_value],[nc,nc_value],[ec,ec_value],[mcc,mcc_value]]],
     [fMRIheader],
     [ROI_path, ROI_prefix, accept_ROI_button],
+    [plot_button_ROI_fig],
     [choose_dim],
     [ROI_fig],
     [slider],
